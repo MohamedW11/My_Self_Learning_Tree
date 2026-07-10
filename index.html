@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mohamed — Self Learning</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<main style="padding:0">
+  <div class="timeline-wrap">
+
+    <div class="timeline-header">
+      <button id="themeToggle" class="theme-btn tl-theme">Light</button>
+      <h1>Mohamed</h1>
+      <a href="about.html" style="font-family:var(--sans);font-size:.82rem;color:var(--text-dim);display:block;margin-top:6px">about</a>
+    </div>
+
+    <div id="branchList"></div>
+
+    <div class="timeline-end" id="journeyStart"><span></span></div>
+
+  </div>
+</main>
+
+<!-- fixed left button -->
+<button class="scroll-start-btn" onclick="document.getElementById('journeyStart').scrollIntoView({behavior:'smooth'})">
+  ↓ go to start
+</button>
+
+<script src="theme.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-config.js"></script>
+<script>
+async function loadTopics(){
+  const container = document.getElementById('branchList');
+  try{
+    const { data, error } = await supabaseClient
+      .from('topics')
+      .select('*')
+      .eq('published', true)
+      .order('created_at', { ascending: false });
+
+    if(error) throw error;
+    const topics = data || [];
+
+    if(!topics.length){
+      container.innerHTML = '<div class="timeline-empty">Nothing yet — the journey is just starting.</div>';
+      return;
+    }
+
+    const total = topics.length;
+    container.innerHTML = topics.map((t, i) => {
+      const side = (total - 1 - i) % 2 === 0 ? 'right' : 'left';
+      const num = String(total - i).padStart(2,'0');
+      if(t.has_content){
+        return `
+          <div class="branch ${side}">
+            <div class="branch-card has-content" onclick="window.location='topic.html?slug=${encodeURIComponent(t.slug)}'">
+              <div class="branch-num">${num}</div>
+              <h2>${escHtml(t.title)}</h2>
+              ${t.excerpt ? `<p>${escHtml(t.excerpt)}</p>` : ''}
+            </div>
+          </div>`;
+      } else {
+        return `
+          <div class="branch ${side}">
+            <div class="branch-card no-content">
+              <div class="branch-num">${num}</div>
+              <h2>${escHtml(t.title)}</h2>
+              ${t.excerpt ? `<p>${escHtml(t.excerpt)}</p>` : ''}
+              <div class="lock">// not written yet</div>
+            </div>
+          </div>`;
+      }
+    }).join('');
+
+  }catch(err){
+    container.innerHTML = `<div class="timeline-empty">Could not load. (${escHtml(err.message||String(err))})</div>`;
+  }
+}
+
+function escHtml(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+loadTopics();
+</script>
+</body>
+</html>

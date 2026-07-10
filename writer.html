@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Writer (Private)</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <div class="logo">Mohamed</div>
+    <nav>
+      <span style="font-family:var(--sans);font-size:.9rem;color:var(--text-dim)">writer</span>
+      <button id="logoutBtn" class="theme-btn" style="display:none;margin-left:18px">Log out</button>
+      <button id="themeToggle" class="theme-btn" style="margin-left:18px">Light</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+
+    <!-- LOGIN -->
+    <div id="loginScreen" class="login-box">
+      <h1>Sign in</h1>
+      <p class="sub">Private area.</p>
+      <div class="field"><input type="email" id="email" placeholder="email"></div>
+      <div class="field"><input type="password" id="password" placeholder="password"></div>
+      <button class="btn primary" id="loginBtn">Sign in</button>
+      <p id="loginMsg" style="font-family:var(--sans);font-size:.85rem;color:var(--text-dim);margin-top:10px"></p>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div id="dashboard" style="display:none">
+
+      <!-- LIST -->
+      <div id="listView">
+        <h1>Topics</h1>
+        <p class="sub">Each topic is a branch on the timeline. Add content to make it clickable.</p>
+        <button class="btn primary" id="newTopicBtn">+ New topic</button>
+        <div id="topicListAdmin" style="margin-top:20px"></div>
+      </div>
+
+      <!-- EDIT -->
+      <div id="editView" style="display:none">
+        <a class="back-link" id="backBtn" style="cursor:pointer">← back to list</a>
+        <h1 id="editHeading">New topic</h1>
+
+        <div class="field">
+          <label>Title (shown on the branch)</label>
+          <input type="text" id="title" placeholder="e.g. Git & GitHub">
+        </div>
+        <div class="field">
+          <label>Short description (optional — shown under the title on the branch)</label>
+          <input type="text" id="excerpt" placeholder="e.g. Version control basics">
+        </div>
+
+        <div class="field" style="display:flex;align-items:center;gap:12px">
+          <input type="checkbox" id="hasContent" style="width:auto;padding:0">
+          <label for="hasContent" style="margin:0;cursor:pointer">This topic has written content (makes it clickable)</label>
+        </div>
+
+        <div id="contentSection">
+          <h2 style="margin-top:28px">1 — Import your document</h2>
+          <p class="sub" style="margin-bottom:12px">
+            Write in Google Docs → File → Download → Microsoft Word (.docx) → upload here.
+            Use Heading 1/2/3 for headings. Use Courier New font for code blocks.
+          </p>
+          <div class="upload-zone" id="uploadZone">
+            <input type="file" id="docxInput" accept=".docx">
+            <div id="uploadLabel">📄 Click or drag & drop your .docx file here</div>
+          </div>
+          <div class="status-bar" id="importStatus"></div>
+
+          <h2>2 — Preview</h2>
+          <div class="preview-box" id="previewBox">
+            <span style="color:var(--text-dim);font-family:var(--sans)">Import a document above to see a preview.</span>
+          </div>
+
+          <h2 style="margin-top:28px">3 — Add images &amp; diagrams</h2>
+          <p class="sub" style="margin-bottom:12px">Placed at the position you choose relative to headings in the doc.</p>
+          <div id="extraBlockList"></div>
+          <div class="add-extra-row">
+            <button class="btn" data-add="image">+ Image</button>
+            <button class="btn" data-add="diagram">+ Diagram</button>
+            <button class="btn" data-add="spacer">+ Space</button>
+          </div>
+        </div>
+
+        <h2>Publish</h2>
+        <div class="row">
+          <button class="btn" id="saveDraftBtn">Save as draft</button>
+          <button class="btn primary" id="publishBtn">Publish to timeline</button>
+        </div>
+        <p id="msg"></p>
+      </div>
+
+    </div>
+  </div>
+</main>
+
+<script src="theme.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+<script src="supabase-config.js"></script>
+<script>
+let importedHtml = '';
+let extraBlocks = [];
+let extraBlockId = 0;
+let currentTopicId = null;
+let allTopics = [];
+let headingPositions = [];
+
+// ── HELPERS ──
+function escHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escXml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function slugify(s){ return s.toLowerCase().trim().replace(/[^a-z0-9\s-]/g,'').replace(/\s+/g,'-').replace(/-+/g,'-'); }
+
+// ── AUTH ──
+async function checkSession(){
+  const { data } = await supabaseClient.auth.getSession();
+  if(data && data.session){
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'block';
+    document.getElementById('logoutBtn').style.display = 'inline-block';
+    loadTopics();
+  } else {
+    document.getElementById('loginScreen').style.display = 'block';
+    document.getElementById('dashboard').style.display = 'none';
+    document.getElementById('logoutBtn').style.display = 'none';
+  }
+}
+
+async function login(){
+  const email = document.getElementById('email').value.trim();
+  const pass = document.getElementById('password').value;
+  const msg = document.getElementById('loginMsg');
+  msg.textContent = 'Signing in...';
+  try{
+    const { error } = await supabaseClient.auth.signInWithPassword({ email, password: pass });
+    if(error){ msg.textContent = error.message; }
+    else { msg.textContent = ''; checkSession(); }
+  }catch(e){ msg.textContent = e.message||String(e); }
+}
+
+async function logout(){ await supabaseClient.auth.signOut(); checkSession(); }
+
+// ── LIST ──
+async function loadTopics(){
+  const container = document.getElementById('topicListAdmin');
+  try{
+    const { data, error } = await supabaseClient.from('topics').select('*').order('created_at', { ascending: true });
+    if(error) throw error;
+    allTopics = data || [];
+    renderTopicList();
+  }catch(e){ container.innerHTML = `<p class="sub">${escHtml(e.message||String(e))}</p>`; }
+}
+
+function renderTopicList(){
+  const container = document.getElementById('topicListAdmin');
+  if(!allTopics.length){ container.innerHTML = '<p class="sub">No topics yet.</p>'; return; }
+  container.innerHTML = '';
+  allTopics.forEach((t, i) => {
+    const row = document.createElement('div');
+    row.className = 'draft-item';
+    const left = document.createElement('div');
+    const strong = document.createElement('strong');
+    strong.textContent = `${i+1}. ${t.title}`;
+    const s1 = document.createElement('span');
+    s1.className = 'status '+(t.published?'published':'draft');
+    s1.textContent = t.published?'published':'draft';
+    const s2 = document.createElement('span');
+    s2.className = 'status';
+    s2.textContent = t.has_content?'has content':'no content';
+    left.appendChild(strong); left.appendChild(s1); left.appendChild(s2);
+    const right = document.createElement('div');
+    const editBtn = document.createElement('button');
+    editBtn.className='small-btn'; editBtn.textContent='edit';
+    editBtn.onclick = () => editTopic(t.id);
+    const delBtn = document.createElement('button');
+    delBtn.className='small-btn'; delBtn.textContent='delete'; delBtn.style.marginLeft='6px';
+    delBtn.onclick = () => deleteTopic(t.id);
+    right.appendChild(editBtn); right.appendChild(delBtn);
+    row.appendChild(left); row.appendChild(right);
+    container.appendChild(row);
+  });
+}
+
+function showList(){
+  document.getElementById('listView').style.display = 'block';
+  document.getElementById('editView').style.display = 'none';
+}
+function showEdit(){
+  document.getElementById('listView').style.display = 'none';
+  document.getElementById('editView').style.display = 'block';
+}
+
+function resetEdit(){
+  currentTopicId = null; importedHtml = ''; extraBlocks = []; extraBlockId = 0; headingPositions = [];
+  document.getElementById('editHeading').textContent = 'New topic';
+  document.getElementById('title').value = '';
+  document.getElementById('excerpt').value = '';
+  document.getElementById('hasContent').checked = false;
+  document.getElementById('uploadLabel').textContent = '📄 Click or drag & drop your .docx file here';
+  document.getElementById('importStatus').textContent = '';
+  document.getElementById('previewBox').innerHTML = '<span style="color:var(--text-dim);font-family:var(--sans)">Import a document above to see a preview.</span>';
+  document.getElementById('extraBlockList').innerHTML = '';
+  document.getElementById('msg').textContent = '';
+  toggleContentSection();
+}
+
+function newTopic(){ resetEdit(); showEdit(); }
+
+function editTopic(id){
+  const t = allTopics.find(x => x.id === id);
+  if(!t) return;
+  currentTopicId = id;
+  importedHtml = t.imported_html || '';
+  extraBlocks = []; extraBlockId = 0; headingPositions = [];
+  if(t.extra_blocks_json){
+    try{ JSON.parse(t.extra_blocks_json).forEach(b => extraBlocks.push({...b, id: extraBlockId++})); }catch(e){}
+  }
+  document.getElementById('editHeading').textContent = 'Edit topic';
+  document.getElementById('title').value = t.title || '';
+  document.getElementById('excerpt').value = t.excerpt || '';
+  document.getElementById('hasContent').checked = !!t.has_content;
+  document.getElementById('uploadLabel').textContent = importedHtml ? '✓ Document loaded (re-upload to replace)' : '📄 Click or drag & drop your .docx file here';
+  document.getElementById('importStatus').textContent = importedHtml ? 'Document already imported.' : '';
+  document.getElementById('previewBox').innerHTML = importedHtml || '<span style="color:var(--text-dim);font-family:var(--sans)">No document imported yet.</span>';
+  document.getElementById('msg').textContent = '';
+  if(importedHtml) extractHeadings();
+  renderExtraBlocks();
+  toggleContentSection();
+  showEdit();
+}
+
+async function deleteTopic(id){
+  if(!confirm('Delete this topic permanently?')) return;
+  try{
+    const { error } = await supabaseClient.from('topics').delete().eq('id', id);
+    if(error) throw error;
+    loadTopics();
+  }catch(e){ alert(e.message||String(e)); }
+}
+
+function toggleContentSection(){
+  document.getElementById('contentSection').style.display =
+    document.getElementById('hasContent').checked ? 'block' : 'none';
+}
+
+// ── DOCX IMPORT ──
+async function handleDocx(file){
+  if(!file||!file.name.endsWith('.docx')){
+    document.getElementById('importStatus').textContent = 'Please select a .docx file.';
+    return;
+  }
+  document.getElementById('importStatus').textContent = 'Reading document...';
+  document.getElementById('uploadLabel').textContent = '⏳ Processing...';
+  try{
+    const buf = await file.arrayBuffer();
+    const result = await mammoth.convertToHtml({ arrayBuffer: buf }, {
+      styleMap: [
+        "p[style-name='Code'] => pre > code",
+        "p[style-name='Preformatted Text'] => pre > code",
+      ],
+      convertImage: mammoth.images.inline(el =>
+        el.read('base64').then(b64 => ({ src: `data:${el.contentType};base64,${b64}` }))
+      )
+    });
+    let html = result.value;
+    html = html.replace(/<p>\s*<\/p>/g, '');
+    importedHtml = html;
+    document.getElementById('previewBox').innerHTML = html;
+    document.getElementById('importStatus').textContent = '✓ Imported successfully.';
+    document.getElementById('uploadLabel').textContent = '✓ ' + file.name;
+    extractHeadings();
+    renderExtraBlocks();
+  }catch(e){
+    document.getElementById('importStatus').textContent = 'Error: '+(e.message||String(e));
+    document.getElementById('uploadLabel').textContent = '📄 Click or drag & drop your .docx file here';
+  }
+}
+
+function extractHeadings(){
+  headingPositions = [{ value:'start', label:'At the beginning' }];
+  const doc = new DOMParser().parseFromString(importedHtml,'text/html');
+  doc.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach((h,i) => {
+    headingPositions.push({ value:'after-'+i, label:'After: '+h.textContent.trim().slice(0,50) });
+  });
+  headingPositions.push({ value:'end', label:'At the end' });
+}
+
+// ── EXTRA BLOCKS ──
+function addExtraBlock(type){
+  extraBlocks.push({ id: extraBlockId++, type, value:'', caption:'', position:'end', svg:'' });
+  if(!headingPositions.length) headingPositions = [{value:'start',label:'At the beginning'},{value:'end',label:'At the end'}];
+  renderExtraBlocks();
+}
+function removeExtraBlock(id){ extraBlocks = extraBlocks.filter(b=>b.id!==id); renderExtraBlocks(); }
+function updateExtra(id,field,val){ const b=extraBlocks.find(b=>b.id===id); if(b) b[field]=val; }
+
+function handleImage(file,id){
+  if(!file) return;
+  const r=new FileReader();
+  r.onload=e=>{ updateExtra(id,'value',e.target.result); renderExtraBlocks(); };
+  r.readAsDataURL(file);
+}
+
+function previewDiagram(id){
+  const b=extraBlocks.find(b=>b.id===id); if(!b) return;
+  const lines=(b.value||'').split('\n').map(l=>l.trim()).filter(l=>l.length);
+  const c=document.getElementById('dp-'+id);
+  if(!lines.length){ c.innerHTML=''; b.svg=''; return; }
+  const bW=280,bH=50,gY=90,cx=200;
+  let svg=`<svg width="100%" viewBox="0 0 400 ${lines.length*90}" xmlns="http://www.w3.org/2000/svg" font-family="monospace">`;
+  lines.forEach((line,i)=>{
+    const y=i*gY+10,isEdge=i===0||i===lines.length-1;
+    svg+=`<rect x="${cx-bW/2}" y="${y}" width="${bW}" height="${bH}" rx="${isEdge?25:8}" fill="var(--bg)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="${cx}" y="${y+bH/2+5}" text-anchor="middle" font-size="14" fill="var(--text)">${escXml(line)}</text>`;
+    if(i<lines.length-1)
+      svg+=`<line x1="${cx}" y1="${y+bH}" x2="${cx}" y2="${y+gY}" stroke="var(--text-dim)" stroke-width="2" marker-end="url(#a${id})"/>`;
+  });
+  svg+=`<defs><marker id="a${id}" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--text-dim)"/></marker></defs></svg>`;
+  c.innerHTML=svg; b.svg=svg;
+}
+
+function renderExtraBlocks(){
+  const list=document.getElementById('extraBlockList');
+  list.innerHTML='';
+  if(!extraBlocks.length) return;
+  if(!headingPositions.length) headingPositions=[{value:'start',label:'At the beginning'},{value:'end',label:'At the end'}];
+  extraBlocks.forEach(b=>{
+    const w=document.createElement('div'); w.className='extra-block';
+    const head=document.createElement('div'); head.className='extra-block-head';
+    const lbl=document.createElement('span'); lbl.textContent=b.type;
+    const rm=document.createElement('button'); rm.className='small-btn'; rm.textContent='remove';
+    rm.onclick=()=>removeExtraBlock(b.id);
+    head.appendChild(lbl); head.appendChild(rm); w.appendChild(head);
+
+    // position
+    const posRow=document.createElement('div'); posRow.style.display='flex'; posRow.style.alignItems='center'; posRow.style.gap='8px';
+    const posLbl=document.createElement('label'); posLbl.style.fontFamily='var(--sans)'; posLbl.style.fontSize='.82rem'; posLbl.style.color='var(--text-dim)'; posLbl.textContent='Position:';
+    const posSel=document.createElement('select'); posSel.className='pos-select';
+    headingPositions.forEach(p=>{ const o=document.createElement('option'); o.value=p.value; o.textContent=p.label; if(b.position===p.value) o.selected=true; posSel.appendChild(o); });
+    posSel.onchange=()=>updateExtra(b.id,'position',posSel.value);
+    posRow.appendChild(posLbl); posRow.appendChild(posSel); w.appendChild(posRow);
+
+    if(b.type==='image'){
+      const fi=document.createElement('input'); fi.type='file'; fi.accept='image/*';
+      fi.onchange=e=>handleImage(e.target.files[0],b.id); w.appendChild(fi);
+      const ci=document.createElement('input'); ci.type='text'; ci.placeholder='Caption (optional)'; ci.value=b.caption||'';
+      ci.oninput=()=>updateExtra(b.id,'caption',ci.value); w.appendChild(ci);
+      if(b.value){ const img=document.createElement('img'); img.className='preview'; img.src=b.value; w.appendChild(img); }
+    } else if(b.type==='diagram'){
+      const ta=document.createElement('textarea'); ta.placeholder='One step per line\nStart\nProcess\nEnd'; ta.value=b.value||'';
+      ta.oninput=()=>updateExtra(b.id,'value',ta.value); w.appendChild(ta);
+      const pb=document.createElement('button'); pb.className='small-btn'; pb.textContent='Preview diagram';
+      pb.onclick=()=>previewDiagram(b.id); w.appendChild(pb);
+      const pd=document.createElement('div'); pd.id='dp-'+b.id; pd.innerHTML=b.svg||''; w.appendChild(pd);
+    } else if(b.type==='spacer'){
+      const sl=document.createElement('label'); sl.style.fontFamily='var(--sans)'; sl.style.fontSize='.85rem'; sl.style.color='var(--text-dim)'; sl.textContent='Height: ';
+      const ss=document.createElement('select'); ss.className='pos-select';
+      [['20','Small (20px)'],['40','Medium (40px)'],['80','Large (80px)'],['120','Extra large (120px)']].forEach(([v,n])=>{
+        const o=document.createElement('option'); o.value=v; o.textContent=n; if((b.value||'40')===v) o.selected=true; ss.appendChild(o);
+      });
+      if(!b.value) b.value='40';
+      ss.onchange=()=>updateExtra(b.id,'value',ss.value);
+      sl.appendChild(ss); w.appendChild(sl);
+    }
+    list.appendChild(w);
+  });
+}
+
+// ── BUILD FINAL HTML ──
+function buildFinalHtml(){
+  if(!importedHtml) return '';
+  const doc=new DOMParser().parseFromString(importedHtml,'text/html');
+  const headings=Array.from(doc.querySelectorAll('h1,h2,h3,h4,h5,h6'));
+  headings.forEach((h,i)=>h.setAttribute('data-idx',i));
+  const atStart=extraBlocks.filter(b=>b.position==='start');
+  const atEnd=extraBlocks.filter(b=>b.position==='end');
+  const afterH={};
+  extraBlocks.filter(b=>b.position.startsWith('after-')).forEach(b=>{
+    const idx=b.position.replace('after-','');
+    if(!afterH[idx]) afterH[idx]=[];
+    afterH[idx].push(b);
+  });
+  function bHtml(b){
+    if(b.type==='image'&&b.value){ const cap=b.caption?`<p style="text-align:center;font-size:.85rem;color:var(--text-dim)">${escHtml(b.caption)}</p>`:''; return `<img src="${b.value}" alt="${escHtml(b.caption||'')}">${cap}`; }
+    if(b.type==='diagram'&&b.svg) return b.svg;
+    if(b.type==='spacer') return `<div style="height:${b.value||40}px"></div>`;
+    return '';
+  }
+  let html=atStart.map(bHtml).join('\n')+doc.body.innerHTML+atEnd.map(bHtml).join('\n');
+  Object.entries(afterH).forEach(([idx,blocks])=>{
+    const ins=blocks.map(bHtml).join('\n');
+    html=html.replace(new RegExp(`(data-idx="${idx}"[^>]*>[\\s\\S]*?<\\/h[1-6]>)`),`$1${ins}`);
+  });
+  html=html.replace(/\s*data-idx="\d+"/g,'');
+  return html;
+}
+
+// ── SAVE ──
+async function saveTopic(publish){
+  const msg=document.getElementById('msg');
+  const title=document.getElementById('title').value.trim();
+  if(!title){ msg.textContent='Title is required.'; return; }
+  const hasContent=document.getElementById('hasContent').checked;
+  if(hasContent&&!importedHtml){ msg.textContent='Please import a document or uncheck "has content".'; return; }
+  const excerpt=document.getElementById('excerpt').value.trim();
+  const slug=slugify(title);
+  const body=hasContent?buildFinalHtml():'';
+  const extraJson=JSON.stringify(extraBlocks.map(b=>{ const c={...b}; delete c.id; return c; }));
+  const record={ title, slug, excerpt, has_content:hasContent, body, imported_html:importedHtml, extra_blocks_json:extraJson, published:publish };
+  msg.textContent='Saving...';
+  try{
+    let error;
+    if(currentTopicId){ ({error}=await supabaseClient.from('topics').update(record).eq('id',currentTopicId)); }
+    else { ({error}=await supabaseClient.from('topics').insert(record)); }
+    if(error) throw error;
+    msg.textContent=publish?'Published!':'Saved as draft.';
+    await loadTopics();
+    setTimeout(showList,700);
+  }catch(e){ msg.textContent='Error: '+(e.message||String(e)); }
+}
+
+// ── EVENTS ──
+document.getElementById('loginBtn').onclick=login;
+document.getElementById('logoutBtn').onclick=logout;
+document.getElementById('newTopicBtn').onclick=newTopic;
+document.getElementById('backBtn').onclick=showList;
+document.getElementById('saveDraftBtn').onclick=()=>saveTopic(false);
+document.getElementById('publishBtn').onclick=()=>saveTopic(true);
+document.getElementById('password').addEventListener('keydown',e=>{ if(e.key==='Enter') login(); });
+document.getElementById('hasContent').onchange=toggleContentSection;
+
+document.getElementById('uploadZone').addEventListener('click',()=>document.getElementById('docxInput').click());
+document.getElementById('docxInput').addEventListener('change',e=>handleDocx(e.target.files[0]));
+const zone=document.getElementById('uploadZone');
+zone.addEventListener('dragover',e=>{ e.preventDefault(); zone.classList.add('drag-over'); });
+zone.addEventListener('dragleave',()=>zone.classList.remove('drag-over'));
+zone.addEventListener('drop',e=>{ e.preventDefault(); zone.classList.remove('drag-over'); handleDocx(e.dataTransfer.files[0]); });
+
+document.querySelectorAll('[data-add]').forEach(btn=>btn.onclick=()=>addExtraBlock(btn.getAttribute('data-add')));
+
+checkSession();
+</script>
+</body>
+</html>

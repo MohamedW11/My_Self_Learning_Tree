@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Topic — Mohamed</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <div class="logo">Mohamed</div>
+    <nav>
+      <a href="index.html">← journey</a>
+      <button id="themeToggle" class="theme-btn" style="margin-left:18px">Light</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap" id="content">
+    <p class="sub">Loading...</p>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <a href="https://www.linkedin.com/" target="_blank">LinkedIn</a>
+    <a href="https://www.instagram.com/" target="_blank">Instagram</a>
+  </div>
+</footer>
+
+<script src="theme.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-config.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const slug = params.get('slug');
+const content = document.getElementById('content');
+
+function escHtml(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+async function loadTopic(){
+  if(!slug){ notFound(); return; }
+  try{
+    const { data, error } = await supabaseClient
+      .from('topics')
+      .select('*')
+      .eq('slug', slug)
+      .eq('published', true)
+      .maybeSingle();
+
+    if(error) throw error;
+    if(!data || !data.has_content){ notFound(); return; }
+
+    document.title = data.title + ' — Mohamed';
+    const date = new Date(data.created_at).toLocaleDateString(undefined, { year:'numeric', month:'long', day:'numeric' });
+
+    content.innerHTML = `
+      <a href="index.html" class="back-link">← back to journey</a>
+      <h1>${escHtml(data.title)}</h1>
+      <div class="sub" style="font-size:.9rem">${date}</div>
+      <div class="article-body">${data.body || ''}</div>
+    `;
+  }catch(err){
+    notFound(escHtml(err.message||String(err)));
+  }
+}
+
+function notFound(extra){
+  content.innerHTML = `
+    <a href="index.html" class="back-link">← back to journey</a>
+    <h1>Not found</h1>
+    <p class="sub">${extra || "This topic doesn't exist or has no content yet."}</p>
+  `;
+}
+
+loadTopic();
+</script>
+</body>
+</html>
